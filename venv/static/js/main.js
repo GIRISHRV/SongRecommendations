@@ -51,6 +51,8 @@ document.getElementById('recommend-button').addEventListener('click', function()
     // Show spinner
     spinner.style.display = 'flex';
 
+    const baseUrl = window.location.origin;
+
     if (file) {
         const reader = new FileReader();
         reader.onload = function(event) {
@@ -59,7 +61,7 @@ document.getElementById('recommend-button').addEventListener('click', function()
             console.log('File content:', fileContent);
             const tracks = parseFileContent(fileContent);
             console.log('Parsed tracks:', tracks);
-            getRecommendations(tracks)
+            getRecommendations(tracks, baseUrl)
                 .then(recommendations => {
                     console.log('Received recommendations:', recommendations);
                     displayRecommendations(recommendations);
@@ -77,7 +79,7 @@ document.getElementById('recommend-button').addEventListener('click', function()
         };
         reader.readAsText(file);
     } else if (link) {
-        fetch('http://127.0.0.1:5000/playlist-details', {
+        fetch(`${baseUrl}/playlist-details`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -93,7 +95,7 @@ document.getElementById('recommend-button').addEventListener('click', function()
         .then(data => {
             const { playlistName, tracks } = data;
             fileName.textContent = `Selected playlist: ${playlistName}`;
-            getRecommendations(tracks)
+            getRecommendations(tracks, baseUrl)
                 .then(recommendations => {
                     console.log('Received recommendations:', recommendations);
                     displayRecommendations(recommendations);
@@ -135,8 +137,8 @@ function parseFileContent(content) {
     });
 }
 
-function getRecommendations(tracks) {
-    return fetch('http://127.0.0.1:5000/recommendations', {
+function getRecommendations(tracks, baseUrl) {
+    return fetch(`${baseUrl}/recommendations`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'

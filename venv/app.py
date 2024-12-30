@@ -1,11 +1,12 @@
 import base64
 import requests
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder='static')
 
 SPOTIFY_CLIENT_ID = 'YOUR_SPOTIFY_CLIENT_ID'
 SPOTIFY_CLIENT_SECRET = 'YOUR_SPOTIFY_CLIENT_SECRET'
+LASTFM_API_KEY = 'YOUR_LASTFM_API_KEY'
 
 def get_spotify_access_token():
     auth_response = requests.post(
@@ -61,7 +62,7 @@ def get_recommendations():
                     'http://ws.audioscrobbler.com/2.0/',
                     params={
                         'method': 'track.getInfo',
-                        'api_key': lastfm_api_key,
+                        'api_key': LASTFM_API_KEY,
                         'artist': artist,
                         'track': track_name,
                         'format': 'json'
@@ -84,17 +85,6 @@ def get_recommendations():
                     spotify_url = spotify_search_result['tracks']['items'][0]['external_urls']['spotify'] if spotify_search_result['tracks']['items'] else ''
                     image_url = track_info.get('album', {}).get('image', [{}])[-1].get('#text', '')
 
-                    # Fetch image from Spotify if missing
-                    if not image_url and spotify_search_result['tracks']['items']:
-                        track_id = spotify_search_result['tracks']['items'][0]['id']
-                        track_details = requests.get(
-                            f'https://api.spotify.com/v1/tracks/{track_id}',
-                            headers={
-                                'Authorization': f'Bearer {access_token}'
-                            }
-                        ).json()
-                        image_url = track_details['album']['images'][0]['url'] if track_details['album']['images'] else ''
-
                     recommendations_with_metadata.append({
                         'artist': artist,
                         'track': track_name,
@@ -110,5 +100,9 @@ def get_recommendations():
         print('Error calling Gemini API:', e)
         return jsonify({'error': str(e)}), 500
 
+@app.route('/static/<path:path>')
+def send_static(path):
+    return send_from_directory('static', path)
+
 #if __name__ == '__main__':
- #   app.run(debug=False)
+#    app.run(debug=False)

@@ -1,58 +1,24 @@
-from flask import Flask, jsonify, request, send_from_directory
-from flask_cors import CORS
-from dotenv import load_dotenv
-import os
+import base64
 import requests
-import google.generativeai as genai
-import spotipy
-from spotipy.oauth2 import SpotifyClientCredentials
+from flask import Flask, request, jsonify
 
-# Load environment variables from .env file
-load_dotenv()
+app = Flask(__name__)
 
-app = Flask(__name__, static_folder='static')
-CORS(app)
+SPOTIFY_CLIENT_ID = 'YOUR_SPOTIFY_CLIENT_ID'
+SPOTIFY_CLIENT_SECRET = 'YOUR_SPOTIFY_CLIENT_SECRET'
 
-# Get the Last.fm API key from the environment variables
-lastfm_api_key = os.environ.get("LASTFM_API_KEY")
-if not lastfm_api_key:
-    raise ValueError("No LASTFM_API_KEY found in environment variables")
-
-# Configure the Gemini API client with the API key from the environment variable
-api_key = os.environ.get("GEMINI_API_KEY")
-if not api_key:
-    raise ValueError("No GEMINI_API_KEY found in environment variables")
-genai.configure(api_key=api_key)
-
-# Configure Spotify API client
-spotify_client_id = os.environ.get("SPOTIFY_CLIENT_ID")
-spotify_client_secret = os.environ.get("SPOTIFY_CLIENT_SECRET")
-if not spotify_client_id or not spotify_client_secret:
-    raise ValueError("No Spotify client credentials found in environment variables")
-spotify = spotipy.Spotify(client_credentials_manager=SpotifyClientCredentials(client_id=spotify_client_id, client_secret=spotify_client_secret))
-
-@app.route('/config')
-def get_config():
-    return jsonify({
-        'clientId': os.getenv('SPOTIFY_CLIENT_ID'),
-        'redirectUri': os.getenv('SPOTIFY_REDIRECT_URI')
-    })
-@app.route('/playlist-details', methods=['POST'])
-def get_playlist_details():
-    data = request.json
-    playlist_link = data.get('playlistLink', '')
-
-    if playlist_link:
-        try:
-            playlist_id = playlist_link.split('/')[-1].split('?')[0]
-            playlist = spotify.playlist(playlist_id)
-            playlist_name = playlist['name']
-            tracks = [{'artist': item['track']['artists'][0]['name'], 'track': item['track']['name']} for item in playlist['tracks']['items']]
-            return jsonify({'playlistName': playlist_name, 'tracks': tracks})
-        except Exception as e:
-            return jsonify({'error': 'Failed to fetch playlist. Please ensure the playlist is public and accessible.'}), 400
-
-    return jsonify({'error': 'No playlist link provided.'}), 400
+def get_spotify_access_token():
+    auth_response = requests.post(
+        'https://accounts.spotify.com/api/token',
+        data={
+            'grant_type': 'client_credentials'
+        },
+        headers={
+            'Authorization': f'Basic {base64.b64encode(f"{SPOTIFY_CLIENT_ID}:{SPOTIFY_CLIENT_SECRET}".encode()).decode()}'
+        }
+    )
+    auth_response_data = auth_response.json()
+    return auth_response_data['access_token']
 
 @app.route('/recommendations', methods=['POST'])
 def get_recommendations():
@@ -63,15 +29,19 @@ def get_recommendations():
     if playlist_link:
         try:
             playlist_id = playlist_link.split('/')[-1].split('?')[0]
-            results = spotify.playlist_tracks(playlist_id)
+            access_token = get_spotify_access_token()
+            results = requests.get(
+                f'https://api.spotify.com/v1/playlists/{playlist_id}/tracks',
+                headers={
+                    'Authorization': f'Bearer {access_token}'
+                }
+            ).json()
             tracks = [{'artist': item['track']['artists'][0]['name'], 'track': item['track']['name']} for item in results['items']]
         except Exception as e:
             return jsonify({'error': 'Failed to fetch playlist. Please ensure the playlist is public and accessible.'}), 400
 
-    #print('Received tracks:', tracks)  # Debugging statement
-
     # Prepare the prompt for the Gemini API
-    prompt = "Please provide 16 song suggestions based on the following list of tracks. Each suggestion should closely match the genre, style, and energy of the original tracks. If the given track list includes genres like metal, rock, pop, hip-hop, or others, the suggestions should heavily reflect these genres, with emphasis on the musical characteristics (e.g., distorted guitars for metal, strong beats for hip-hop). If applicable, consider the popularity and influence of the songs in the same genre. The output should consist of no other text and should be given as Artist - Song, i heavily emphasize no other sentences or text!. Here are the tracks: \n"
+    prompt = "Please provide 16 song suggestions based on the following list of tracks. Each suggestion should closely match the genre, style, and energy of the original tracks. If the given track list includes genres like metal, rock, pop, hip-hop, or others, the suggestions should heavily reflect these genres, with emphasis on the musical characteristics (e.g., distorted guitars for metal, strong beats for hip-hop). If applicable, consider the popularity and influence of the songs in the same genre. The output should consist of no other text and should be given as Artist - Song, I heavily emphasize no other sentences or text!. Here are the tracks: \n"
     for track in tracks:
         prompt += f"{track['artist']} - {track['track']}\n"
 
@@ -81,8 +51,9 @@ def get_recommendations():
         response = model.generate_content(prompt)
         recommendations = response.text.split('\n')
 
-        # Fetch metadata for each recommended track from Last.fm
+        # Fetch metadata for each recommended track from Last.fm and Spotify
         recommendations_with_metadata = []
+        access_token = get_spotify_access_token()
         for rec in recommendations:
             if ' - ' in rec:
                 artist, track_name = rec.split(' - ', 1)
@@ -99,33 +70,45 @@ def get_recommendations():
                 )
                 if response.status_code == 200:
                     track_info = response.json().get('track', {})
-                    #print(f"Metadata for {artist} - {track_name}: {track_info}")  # Debugging statement
+                    spotify_search_result = requests.get(
+                        'https://api.spotify.com/v1/search',
+                        params={
+                            'q': f"track:{track_name} artist:{artist}",
+                            'type': 'track',
+                            'limit': 1
+                        },
+                        headers={
+                            'Authorization': f'Bearer {access_token}'
+                        }
+                    ).json()
+                    spotify_url = spotify_search_result['tracks']['items'][0]['external_urls']['spotify'] if spotify_search_result['tracks']['items'] else ''
+                    image_url = track_info.get('album', {}).get('image', [{}])[-1].get('#text', '')
+
+                    # Fetch image from Spotify if missing
+                    if not image_url and spotify_search_result['tracks']['items']:
+                        track_id = spotify_search_result['tracks']['items'][0]['id']
+                        track_details = requests.get(
+                            f'https://api.spotify.com/v1/tracks/{track_id}',
+                            headers={
+                                'Authorization': f'Bearer {access_token}'
+                            }
+                        ).json()
+                        image_url = track_details['album']['images'][0]['url'] if track_details['album']['images'] else ''
+
                     recommendations_with_metadata.append({
                         'artist': artist,
                         'track': track_name,
-                        'image': track_info.get('album', {}).get('image', [{}])[-1].get('#text', '')  # Get the largest image
+                        'image': image_url,
+                        'spotifyUrl': spotify_url
                     })
                 else:
                     print(f"Error fetching metadata for {artist} - {track_name}: {response.status_code}, {response.text}")
 
-        #print('Final recommendations with metadata:', recommendations_with_metadata)  # Debugging statement
         return jsonify(recommendations_with_metadata)
 
     except Exception as e:
-        print('Error calling Gemini API:', e)  # Debugging statement
+        print('Error calling Gemini API:', e)
         return jsonify({'error': str(e)}), 500
 
-@app.route('/')
-def serve_index():
-    return send_from_directory(app.static_folder, 'index.html')
-
-@app.route('/static/<path:path>')
-def send_static(path):
-    return send_from_directory(app.static_folder, path)
-
-@app.route('/test')
-def test():
-    return "App is working!"
-
-#if __name__ == '__main__':
-#    app.run(debug=False)
+if __name__ == '__main__':
+    app.run(debug=False)

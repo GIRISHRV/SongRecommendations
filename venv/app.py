@@ -110,5 +110,5 @@ def get_recommendations():
         print('Error calling Gemini API:', e)
         return jsonify({'error': str(e)}), 500
 
-if __name__ == '__main__':
-    app.run(debug=False)
+#if __name__ == '__main__':
+ #   app.run(debug=False)

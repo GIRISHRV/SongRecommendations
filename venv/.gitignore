@@ -1,0 +1,7 @@
+.env
+.vercel
+.cache
+Lib
+Scripts
+pyvenv.cfg
+vercel.json

@@ -123,5 +123,9 @@ def serve_index():
 def send_static(path):
     return send_from_directory(app.static_folder, path)
 
+@app.route('/test')
+def test():
+    return "App is working!"
+
 if __name__ == '__main__':
     app.run(debug=False)

@@ -1,6 +1,9 @@
-import base64
+from flask import Flask, jsonify, request, send_from_directory
+from flask_cors import CORS
+from dotenv import load_dotenv
+import os
 import requests
-from flask import Flask, request, jsonify, send_from_directory
+import google.generativeai as genai
 
 app = Flask(__name__, static_folder='static')
 
@@ -99,10 +102,19 @@ def get_recommendations():
     except Exception as e:
         print('Error calling Gemini API:', e)
         return jsonify({'error': str(e)}), 500
+    
+@app.route('/')
+def serve_index():
+    return send_from_directory(app.static_folder, 'index.html')
 
 @app.route('/static/<path:path>')
 def send_static(path):
-    return send_from_directory('static', path)
+    return send_from_directory(app.static_folder, path)
+
+@app.route('/test')
+def test():
+    return "App is working!"
 
 #if __name__ == '__main__':
 #    app.run(debug=False)
+
